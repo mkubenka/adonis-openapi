@@ -58,7 +58,7 @@ export class RouterLoader {
     OperationMetadataStorage.mergeMetadata(
       target.prototype,
       {
-        path: route.pattern,
+        path: route.pattern.replace(/:(\w+)/g, '{$1}'),
         methods: route.methods.filter((m) => m !== 'HEAD')
           .map((r) => r.toLowerCase()) as any,
         // tags: [name],
@@ -72,20 +72,32 @@ export class RouterLoader {
 
     const params = route.pattern.match(/:(\w+)/g) ?? []
 
-    OperationParameterMetadataStorage.mergeMetadata(
+    const existingParams = OperationParameterMetadataStorage.getMetadata(
       target.prototype,
-      params.map((item) => {
+      propertyKey,
+    )
+    const existingKeys = new Set(existingParams.map((p) => `${p.name}::${p.in}`))
+
+    const newParams = params
+      .map((item) => {
         const name = item.slice(1)
 
         return {
-          in: 'path',
+          in: 'path' as const,
           required: true,
           name,
           ...this.detectParamType(name, route),
         }
-      }),
-      propertyKey,
-    )
+      })
+      .filter((p) => !existingKeys.has(`${p.name}::${p.in}`))
+
+    if (newParams.length > 0) {
+      OperationParameterMetadataStorage.mergeMetadata(
+        target.prototype,
+        newParams,
+        propertyKey,
+      )
+    }
   }
 
   private detectParamType(name: string, route: RouteJSON) {
@@ -102,8 +114,10 @@ export class RouterLoader {
     }
 
     return {
-      type,
-      format,
+      schema: {
+        type,
+        ...(format ? { format } : {}),
+      },
     }
   }
 
